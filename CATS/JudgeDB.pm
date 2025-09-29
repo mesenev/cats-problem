@@ -148,7 +148,7 @@ sub is_problem_uptodate {
 
     scalar $dbh->selectrow_array(q~
         SELECT 1 FROM problems
-        WHERE id = ? AND upload_date - 1.0000000000 / 24 / 60 / 60 <= ?~, undef,
+        WHERE id = ? AND upload_date - 1.0000000000 / 24 / 60 / 60 <= to_timestamp(?, 'DD-MM-YYYY HH24:MI:SS.MS')~, undef,
         $pid, $date);
 }
 
