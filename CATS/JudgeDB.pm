@@ -809,10 +809,16 @@ sub insert_req_details {
         $dbh->do(_u $sql->insert(req_details => $rd));
 
         if ($p{output_size}) {
-            $dbh->do(q~
+            # 🔥 Для bytea ОБЯЗАТЕЛЬНО используем prepare + bind_param
+            my $sth = $dbh->prepare(q~
                 INSERT INTO solution_output (req_id, test_rank, output, output_size, create_time)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)~, undef,
-                $p{req_id}, $p{test_rank}, $p{output}, $p{output_size});
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)~);
+            
+            $sth->bind_param(1, $p{req_id});
+            $sth->bind_param(2, $p{test_rank});
+            $sth->bind_param(3, $p{output}, { pg_type => DBD::Pg::PG_BYTEA });
+            $sth->bind_param(4, $p{output_size});
+            $sth->execute();
         }
 
         $dbh->commit;
@@ -820,11 +826,10 @@ sub insert_req_details {
     } or do {
         my $err = $@ || $DBI::errstr;
         
-        # 🔑 SQLSTATE 23505 = unique_violation in PostgreSQL
         if ($err =~ /23505/ || $err =~ /duplicate key.*req_details/i) {
             warn "[RACE] Duplicate req_details (req_id=$p{req_id}, test_rank=$p{test_rank}) — ignored";
             $dbh->rollback;
-            return 1;        
+            return 1;
         }
         
         $dbh->rollback;
