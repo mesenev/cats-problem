@@ -800,30 +800,61 @@ sub get_tests_req_details {
 # req_id test_rank result time_used memory_used disk_used checker_comment points
 sub insert_req_details {
     my ($job_id, %p) = @_;
-
     CATS::Job::is_canceled($job_id) and return;
 
-    my ($output, $output_size) = map $p{$_}, qw(output output_size);
+    my @vals = @p{qw(req_id test_rank result time_used memory_used disk_used checker_comment points)};
 
-    my $rd = { map { $_ => $p{$_} } qw(
-        req_id test_rank result time_used memory_used disk_used checker_comment points) };
+    eval {
+        # insert or ignore
+        $dbh->do(q~
+            INSERT INTO req_details (req_id, test_rank, result, time_used, memory_used, disk_used, checker_comment, points)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (req_id, test_rank) DO NOTHING
+        ~, undef, @vals);
 
-    eval { $dbh->do(_u $sql->insert(req_details => $rd)); };
-    if (my $err = $@) {
-        # Maybe retry from judge after crash.
-        $err =~ /UNIQUE.*REQ_DETAILS/ or die $err;
-        warn 'Duplicate req_details';
-        return 1;
-    }
+        if ($p{output_size}) {
+            $dbh->do(q~
+                INSERT INTO solution_output (req_id, test_rank, output, output_size, create_time)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT (req_id, test_rank) DO NOTHING  -- as altternative DO UPDATE SET ...
+            ~, undef, $p{req_id}, $p{test_rank}, $p{output}, $p{output_size});
+        }
 
-    $dbh->do(q~
-        INSERT INTO solution_output (req_id, test_rank, output, output_size, create_time)
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)~, undef,
-        $p{req_id}, $p{test_rank}, $output, $output_size) if $output_size;
-
-    $dbh->commit;
-    1;
+        $dbh->commit;
+        1;
+    } or do {
+        my $err = $@ || $DBI::errstr;
+        $dbh->rollback;
+        die "DB error in insert_req_details: $err";
+    };
 }
+# obsolete v.
+# sub insert_req_details {
+#     my ($job_id, %p) = @_;
+
+#     CATS::Job::is_canceled($job_id) and return;
+
+#     my ($output, $output_size) = map $p{$_}, qw(output output_size);
+
+#     my $rd = { map { $_ => $p{$_} } qw(
+#         req_id test_rank result time_used memory_used disk_used checker_comment points) };
+
+#     eval { $dbh->do(_u $sql->insert(req_details => $rd)); };
+#     if (my $err = $@) {
+#         # Maybe retry from judge after crash.
+#         $err =~ /UNIQUE.*REQ_DETAILS/ or die $err;
+#         warn 'Duplicate req_details';
+#         return 1;
+#     }
+
+#     $dbh->do(q~
+#         INSERT INTO solution_output (req_id, test_rank, output, output_size, create_time)
+#         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)~, undef,
+#         $p{req_id}, $p{test_rank}, $output, $output_size) if $output_size;
+
+#     $dbh->commit;
+#     1;
+# }
 
 sub save_input_test_data {
     my ($problem_id, $test_rank, $input, $input_size, $hash) = @_;
