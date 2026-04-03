@@ -802,28 +802,31 @@ sub insert_req_details {
     my ($job_id, %p) = @_;
     CATS::Job::is_canceled($job_id) and return;
 
-    my @vals = @p{qw(req_id test_rank result time_used memory_used disk_used checker_comment points)};
+    my $rd = { map { $_ => $p{$_} } qw(
+        req_id test_rank result time_used memory_used disk_used checker_comment points) };
 
     eval {
-        # insert or ignore
-        $dbh->do(q~
-            INSERT INTO req_details (req_id, test_rank, result, time_used, memory_used, disk_used, checker_comment, points)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (req_id, test_rank) DO NOTHING
-        ~, undef, @vals);
+        $dbh->do(_u $sql->insert(req_details => $rd));
 
         if ($p{output_size}) {
             $dbh->do(q~
                 INSERT INTO solution_output (req_id, test_rank, output, output_size, create_time)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT (req_id, test_rank) DO NOTHING  -- as altternative DO UPDATE SET ...
-            ~, undef, $p{req_id}, $p{test_rank}, $p{output}, $p{output_size});
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)~, undef,
+                $p{req_id}, $p{test_rank}, $p{output}, $p{output_size});
         }
 
         $dbh->commit;
         1;
     } or do {
         my $err = $@ || $DBI::errstr;
+        
+        # 🔑 SQLSTATE 23505 = unique_violation in PostgreSQL
+        if ($err =~ /23505/ || $err =~ /duplicate key.*req_details/i) {
+            warn "[RACE] Duplicate req_details (req_id=$p{req_id}, test_rank=$p{test_rank}) — ignored";
+            $dbh->rollback;
+            return 1;        
+        }
+        
         $dbh->rollback;
         die "DB error in insert_req_details: $err";
     };
