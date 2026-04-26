@@ -409,7 +409,7 @@ sub set_request_state {
     if (_has_state_params($p, $cats::st_awaiting_verification, qw(account_id problem_id contest_id))) {
         # Latest AW supercedes previous ones.
         $dbh->do(q~
-            UPDATE reqs R SET R.state = ?
+            UPDATE reqs R SET state = ?
             WHERE
                 R.account_id = ? AND R.contest_id = ? AND R.problem_id = ? AND
                 R.state = ?~, undef,
